@@ -1,0 +1,363 @@
+library(Seurat)
+library(KODAMA)
+library(KODAMAextra)
+library("spatialLIBD")
+library("nnSVG")
+library("scater")
+library("scran")
+library("scry")
+library("SPARK")
+library("bluster")
+library("nnet")
+library("doSNOW")
+library("mclust")
+library("e1071")
+sample_names = c("151507",
+                 "151508",
+                 "151509",
+                 "151510",
+                 "151669",
+                 "151670",
+                 "151671",
+                 "151672",
+                 "151673",
+                 "151674",
+                 "151675",
+                 "151676")
+
+seurat_object = list()
+df_meta <- list()
+# read samples i = 1
+for (i in seq_along(sample_names)) { 
+  dir = paste("F:/KODAMA/10x_DLPFC-20231216T144540Z-001/10x_DLPFC/", sample_names[i], sep = "")
+  filename = paste(sample_names[i], "_filtered_feature_bc_matrix.h5", sep = "")
+  seurat_object[[i]] <- Load10X_Spatial(data.dir = dir, filename = filename)
+  df_meta[[i]] <- read.table(file.path(dir, 'metadata.tsv'))
+  seurat_object[[i]]@meta.data[["layer_guess_reordered"]] = df_meta[[i]][["layer_guess_reordered"]]
+  seurat_object[[i]] <- SCTransform(seurat_object[[i]],
+                                    assay = "Spatial",
+                                    method = "poisson",
+                                    verbose = TRUE)
+}
+#------------------------------------------------------------------------------#
+
+names(seurat_object) <- sample_names
+ari_results <- list()
+  
+  # Merge the subject data
+ALL <- merge(seurat_object[[1]],
+                          y = c(seurat_object[[2]],
+                                seurat_object[[3]],
+                                seurat_object[[4]], 
+                                seurat_object[[5]],
+                                seurat_object[[6]],
+                                seurat_object[[7]],
+                                seurat_object[[8]],
+                                seurat_object[[9]],
+                                seurat_object[[10]],
+                                seurat_object[[11]],
+                                seurat_object[[12]]), add.cell.ids = sample_names)
+  
+  # Set VariableFeatures
+  VariableFeatures(ALL) <- c(
+    VariableFeatures(seurat_object[[1]]),
+    VariableFeatures(seurat_object[[2]]),
+    VariableFeatures(seurat_object[[3]]),
+    VariableFeatures(seurat_object[[4]]),
+    VariableFeatures(seurat_object[[5]]),
+    VariableFeatures(seurat_object[[6]]),
+    VariableFeatures(seurat_object[[7]]),
+    VariableFeatures(seurat_object[[8]]),
+    VariableFeatures(seurat_object[[9]]),
+    VariableFeatures(seurat_object[[10]]),
+    VariableFeatures(seurat_object[[11]]),
+    VariableFeatures(seurat_object[[12]])
+  )
+  
+  # Set DefaultAssay and perform PCA, UMAP, KODAMA
+  DefaultAssay(ALL) <- "SCT"
+  ALL <- RunPCA(ALL, assay = "SCT", verbose = FALSE)
+  ALL <- RunUMAP(ALL, reduction = "pca", dims = 1:50)
+  ALL <- RunKODAMAmatrix.Seurat(ALL, n.cores = 4, landmarks = 1000, dims = 50, f.par.pls = 50)
+  ALL <- RunKODAMAvisualization(ALL, method = "UMAP")
+  
+  
+  # Make SNN graph
+  KODAMA_graph <- bluster::makeSNNGraph(Embeddings(object = ALL, reduction = "KODAMA"), k = 20)
+  umap_graph <- bluster::makeSNNGraph(Embeddings(object = ALL, reduction = "umap"), k = 20)
+  
+  # Perform Walktrap clustering
+  KODAMA_graph <- igraph::cluster_walktrap(KODAMA_graph)
+  umap_graph <- igraph::cluster_walktrap(umap_graph)
+  
+  # Extract labels
+  labels = as.factor(ALL@meta.data[["layer_guess_reordered"]])
+  ncluster <- sum(table(labels) > 0)
+  
+  kodama_labels = as.character(igraph::cut_at(KODAMA_graph, no = ncluster))
+  umap_labels = as.character(igraph::cut_at(umap_graph, no = ncluster))
+  xy <- NULL
+  for (f in seq_along(ALL@images)) { # 2- extract coordinates
+    slide <- as.matrix(GetTissueCoordinates(ALL@images[[f]]))
+    xy <- rbind(xy, slide)
+  }
+  kodama_refine <- KODAMAextra::refinecluster(kodama_labels, xy, shape = "hexagon")
+  umap_refine <- KODAMAextra::refinecluster(umap_labels, xy, shape = "hexagon")
+  
+  ari_results[[1]] <- list(
+    kk_refine = adjustedRandIndex(labels, kodama_refine),
+    uma_refine = adjustedRandIndex(labels, umap_refine),
+    kk_labels = adjustedRandIndex(labels, kodama_labels),
+    uma_labels = adjustedRandIndex(labels, umap_labels)
+  )
+
+# Assuming ari_results is a list of length n
+n <- length(ari_results)
+
+# Initialize an empty matrix with columns "kk_refine", "uma_refine", "kk_labels", "uma_labels"
+result_matrix <- matrix(nrow = n, ncol = 4, dimnames = list(NULL, c("kk_refine", "uma_refine", "kk_labels", "uma_labels")))
+remove(i)
+
+# Fill in the matrix with values from ari_results
+for (i in 1:n) {
+  result_matrix[i, ] <- unlist(ari_results[[i]])
+}
+
+
+library(Seurat)
+library(KODAMA)
+library(KODAMAextra)
+library("spatialLIBD")
+library("nnSVG")
+library("scater")
+library("scran")
+library("scry")
+library("SPARK")
+library("bluster")
+library("nnet")
+library("doSNOW")
+library("mclust")
+library("e1071")
+
+sample_names = c("151507",
+                 "151508",
+                 "151509",
+                 "151510",
+                 "151669",
+                 "151670",
+                 "151671",
+                 "151672",
+                 "151673",
+                 "151674",
+                 "151675",
+                 "151676")
+
+df_meta = list()
+seurat_object = list()
+# read samples i = 1
+for (i in 1:12) {
+  dir = paste("F:/KODAMA/10x_DLPFC-20231216T144540Z-001/10x_DLPFC/", sample_names[i], sep = "")
+  filename = paste(sample_names[i], "_filtered_feature_bc_matrix.h5", sep = "")
+  seurat_objects[[i]] <- Load10X_Spatial(data.dir = dir, filename = filename)
+  names(seurat_objects[i]) = sample_names[i]
+  df_meta[[i]] <- read.table(file.path(dir, 'metadata.tsv'))
+  seurat_object[[i]]@meta.data[["layer_guess_reordered"]] = df_meta[[i]][["layer_guess_reordered"]]
+  seurat_objects[[i]] <- SCTransform(seurat_objects[[i]], assay = "Spatial", method = "poisson", verbose = TRUE)
+
+}
+#------------------------------------------------------------------------------#
+
+ari_results <- list() #i =1
+for (i in 1:12){
+  seurat_objects[[i]] <- RunPCA(seurat_objects[[i]], assay = "SCT", verbose = FALSE)
+  seurat_objects[[i]] <- RunUMAP(seurat_objects[[i]], reduction = "pca", dims = 1:50, verbose = FALSE)
+  seurat_objects[[i]] <- RunKODAMAmatrix.Seurat(seurat_objects[[i]], n.cores = 4, landmarks = 1000, dims = 50, f.par.pls = 50, FUN="PLS")
+  seurat_objects[[i]] <- RunKODAMAvisualization(seurat_objects[[i]], method = "UMAP")
+  KODAMA_graph <- bluster::makeSNNGraph(Embeddings(object = seurat_objects[[i]], reduction= "KODAMA"), k = 20)
+  umap_graph <- bluster::makeSNNGraph(Embeddings(object = seurat_objects[[i]], reduction= "umap"), k = 20)
+  KODAMA_graph <- igraph::cluster_walktrap(KODAMA_graph)
+  umap_graph <- igraph::cluster_walktrap(umap_graph)
+  labels = as.factor(ALL[[i]]@meta.data[["layer_guess_reordered"]])
+  labels <- as.factor(labels)
+  ncluster= sum(table(labels) > 0)
+  kodama_labels = as.character(igraph::cut_at(KODAMA_graph, no=ncluster))
+  umap_labels = as.character(igraph::cut_at(umap_graph, no=ncluster))
+  xy = Seurat::GetTissueCoordinates(seurat_objects[[i]])
+  kodama_refine <-KODAMAextra::refinecluster(kodama_labels, xy, shape = "hexagon")
+  umap_refine <- KODAMAextra::refinecluster(umap_labels, xy, shape = "hexagon")
+  ari_results[[i]] <- list(
+    kk_refine = adjustedRandIndex(labels, kodama_refine),
+    uma_refine = adjustedRandIndex(labels, umap_refine),
+    kk_labels = adjustedRandIndex(labels, kodama_labels),
+    uma_labels = adjustedRandIndex(labels, umap_labels))
+  pdf(paste("plot_", i, ".pdf", sep = "") )
+  par(mfrow = c(2, 3))
+  plot(xy, col = labels, xlab = "Truth")
+  plot(xy, col = kodama_refine, xlab = "KODAMA_refine")
+  plot(xy, col = umap_refine, xlab = "umap_refine")
+  
+  plot(xy, col = labels, xlab = "Truth")
+  plot(xy, col = kodama_labels, xlab = "kodama_labels")
+  plot(xy, col = umap_labels, xlab = "umap_labels")
+  dev.off()
+  
+}
+# Assuming ari_results is a list of length n
+n <- length(ari_results)
+
+# Initialize an empty matrix with columns "kk_refine", "uma_refine", "kk_labels", "uma_labels"
+result_matrix <- matrix(nrow = n, ncol = 4, dimnames = list(NULL, c("kk_refine", "uma_refine", "kk_labels", "uma_labels")))
+remove(i)
+
+# Fill in the matrix with values from ari_results
+for (i in 1:n) {
+  result_matrix[i, ] <- unlist(ari_results[[i]])
+}
+
+library(Giotto)
+library(reticulate)
+library(KODAMA)
+library(KODAMAextra)
+library(Seurat)
+library("spatialLIBD")
+library("nnSVG")
+library("scater")
+library("scran")
+library("scry")
+library("SPARK")
+library("bluster")
+library("nnet")
+library("doSNOW")
+library("mclust")
+library("e1071")
+library(harmony)
+sample_names = c("151507",
+                 "151508",
+                 "151509",
+                 "151510",
+                 "151669",
+                 "151670",
+                 "151671",
+                 "151672",
+                 "151673",
+                 "151674",
+                 "151675",
+                 "151676")
+df_meta <- NULL
+giotto_object = list()
+ari_results = list()
+# 1. set working directory
+results_folder = 'F:/KODAMA/DLPFC results/GIOTTO'
+setwd(results_folder)
+# Optional: Specify a path to a Python executable within a conda or miniconda
+# environment. If set to NULL (default), the Python executable within the previously
+# installed Giotto environment will be used.
+my_python_path = NULL # alternatively, "/local/python/path/python" if desired.
+
+# 3. Create Giotto Instructions
+instrs = createGiottoInstructions(save_dir = results_folder,
+                                  save_plot = TRUE,
+                                  show_plot = FALSE,
+                                  python_path = my_python_path)
+for (i in 1:12) {
+  data_path = paste0("F:/KODAMA/10x_DLPFC-20231216T144540Z-001/10x_DLPFC/", sample_names[i], "/")
+  h5_visium_path = paste0(data_path,sample_names[i],  "_filtered_feature_bc_matrix.h5")
+  h5_tissue_positions_path = paste0(data_path,"spatial/tissue_positions_list.csv")
+  h5_image_png_path <- paste0(data_path,  "spatial/tissue_lowres_image.png")
+  h5_json_scalefactors_path <- paste0(data_path, "spatial/scalefactors_json.json")
+  giotto_object[[i]] = createGiottoVisiumObject(visium_dir = data_path,
+                                                expr_data = 'filter',
+                                                png_name = 'tissue_hires_image.png',
+                                                gene_column_index = 2,
+                                                instructions = instrs,
+                                                h5_visium_path = h5_visium_path,
+                                                h5_tissue_positions_path = h5_tissue_positions_path,
+                                                h5_image_png_path = h5_image_png_path,
+                                                h5_json_scalefactors_path = h5_json_scalefactors_path)
+  df_meta[[i]] <- read.table(file.path(data_path, 'metadata.tsv'))
+  giotto_object[[i]]@cell_metadata[["cell"]][["rna"]]$layer_guess_reordered <- df_meta[[i]][["layer_guess_reordered"]]
+}
+names(giotto_object) <- sample_names
+
+ALL = joinGiottoObjects(gobject_list = giotto_object,
+                                  gobject_names = sample_names,
+                                  join_method = 'z_stack', z_vals = 1000)
+
+
+
+metadata = pDataDT(ALL)
+in_tissue_barcodes = metadata[in_tissue == 1]$cell_ID
+ALL = subsetGiotto(ALL, cell_ids = in_tissue_barcodes)
+
+## filter
+ALL <- filterGiotto(gobject = ALL,
+                              expression_threshold = 1,
+                              feat_det_in_min_cells = 50,
+                              min_det_feats_per_cell = 500,
+                              expression_values = c('raw'),
+                              verbose = T)
+## normalize
+ALL <- normalizeGiotto(gobject = ALL, scalefactor = 6000)
+
+## add gene & cell statistics
+ALL <- addStatistics(gobject = ALL, expression_values = 'raw')
+
+fmeta = fDataDT(ALL)
+testfeats = fmeta[perc_cells > 20 & perc_cells < 50][100:110]$feat_ID
+## PCA ##
+ALL <- calculateHVF(gobject = ALL)
+ALL <- Giotto::runPCA(gobject = ALL, 
+                                center = TRUE, 
+                                scale_unit = TRUE)
+ALL <- Giotto::runUMAP(ALL, dimensions_to_use = 1:50)
+
+ALL <- RunKODAMAmatrix.giotto(ALL, 
+                                         f.par.pls = 50, 
+                                         FUN="PLS", 
+                                         n.cores=4, 
+                                         landmarks = 1000, 
+                                         M = 10, Tcycle = 5)
+ALL <- RunKODAMAvisualization(ALL, method="UMAP")
+
+ALL = runGiottoHarmony(ALL,
+                                 vars_use = 'list_ID', 
+                                 do_pca = F, 
+                                 dim_reduction_to_use = "umap", 
+                                 dim_reduction_name = "umap", 
+                                 dimensions_to_use = 1:2)
+KODAMA_graph <- bluster::makeSNNGraph(
+  getDimReduction(ALL,
+                  reduction = c("cells", "feats"),
+                  reduction_method = "KODAMA", 
+                  name = "KODAMA",
+                  output =  "matrix",
+                  set_defaults = TRUE), k = 20)
+umap_graph <- bluster::makeSNNGraph(
+  getDimReduction(ALL,
+                  reduction = c("cells", "feats"),
+                  reduction_method = "umap", 
+                  name = "umap",
+                  output =  "matrix",
+                  set_defaults = TRUE), k = 20)
+KODAMA_graph <- igraph::cluster_walktrap(KODAMA_graph)
+umap_graph <- igraph::cluster_walktrap(umap_graph)
+labels <- as.matrix(ALL@cell_metadata[["cell"]][["rna"]]@metaDT[["layer_guess_reordered"]])
+labels <- as.factor(labels)
+ncluster= sum(table(labels) > 0)
+kodama_labels = as.character(igraph::cut_at(KODAMA_graph, no=ncluster))
+umap_labels = as.character(igraph::cut_at(umap_graph, no=ncluster))
+spat_coord = NULL
+spat_coord = getSpatialLocations(ALL, spat_unit = NULL,
+                                 name = NULL, output = "data.table", copy_obj = TRUE,
+                                 verbose = TRUE, set_defaults = TRUE)
+xy_names = spat_coord$cell_ID
+spat_coord = as.matrix(spat_coord[, c(-3,-4)])
+rownames(spat_coord) = xy_names
+kodama_refine <-KODAMAextra::refinecluster(kodama_labels, spat_coord, shape = "hexagon")
+umap_refine <- KODAMAextra::refinecluster(umap_labels, spat_coord, shape = "hexagon")
+
+kk_refine = adjustedRandIndex(labels, kodama_refine)
+uma_refine = adjustedRandIndex(labels, umap_refine)
+kk_labels = adjustedRandIndex(labels, kodama_labels)
+uma_labels = adjustedRandIndex(labels, umap_labels)
+
