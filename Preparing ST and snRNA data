@@ -1,0 +1,38 @@
+library(Seurat)
+library(SeuratData)
+library(SeuratDisk)
+#------------
+seurat <- Load10X_Spatial("F:/KODAMA/10x_DLPFC-20231216T144540Z-001/10x_DLPFC/151669", 
+                              filename = "151669_filtered_feature_bc_matrix.h5")
+labels <- read.csv("F:/KODAMA/SOI/segments.csv")
+s151669 <- labels$samples == "151669"
+s151669 <- labels[s151669,]
+s151669 <- s151669[s151669$segment == c("2","3","4"),]
+table(s151669$segment)
+s151669 <- na.omit(s151669)
+
+seurat@meta.data$cells <- rownames(seurat@meta.data)
+Idents(seurat) <- "cells"
+seurat <- subset(seurat, idents = s151669$ID)
+
+setwd("F:/KODAMA/SOI/reduced/151669")
+DefaultAssay(seurat) = "Spatial"
+seurat[["Spatial"]] <- as(seurat[["Spatial"]], "Assay")
+MuDataSeurat::WriteH5AD(seurat, "s151669.h5ad")
+
+library(spatialLIBD)
+sce_path_zip <- fetch_data("spatialDLPFC_snRNAseq")
+sce_path <- unzip(sce_path_zip, exdir = tempdir())
+file <- "C:/Users/Farag/AppData/Local/Temp/RtmpgPv7Aa/"
+
+setwd("F:/KODAMA/SOI/snRNA")
+
+se <- readRDS("se.rds")
+library(convert2anndata)
+library(anndata)
+library(Matrix)
+counts_sparse <- as(assay(se, "counts"), "dgCMatrix")
+assay(se, "counts") <- counts_sparse  
+assay(se, "logcounts") <- as(assay(se, "logcounts"), "dgCMatrix")
+ad <- convert_to_anndata(se, assayName = "counts", useAltExp = TRUE)
+write_h5ad(ad, "snRNA.h5ad")
