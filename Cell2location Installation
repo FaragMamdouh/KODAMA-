@@ -1,0 +1,9 @@
+conda create -y -n cell2loc_env python=3.10
+
+conda activate cell2loc_env
+export PYTHONNOUSERSITE="literallyanyletters"
+pip install cell2location[tutorials]
+
+conda activate cell2loc_env
+python -m ipykernel install --user --name=cell2loc_env --display-name='Environment (cell2loc_env)'
+
